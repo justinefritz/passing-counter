@@ -13,7 +13,7 @@ from ultralytics import YOLO
 # CONFIGURATION
 # ==========================================
 MODEL_PATH = "yolov8n-pose.pt"
-CSV_FILE = "apc_passenger_counts.csv"
+CSV_FILE = "apc_passing_counts.csv"
 
 SHOW_DISPLAY = True          # Set False on headless bus deployment
 SKIP_FRAMES = 2              # Process AI every N frames
@@ -32,7 +32,7 @@ def async_csv_writer():
     with open(CSV_FILE, mode="a", newline="") as f:
         writer = csv.writer(f)
         if not file_exists:
-            writer.writerow(["Timestamp", "Track ID", "Direction", "Total Boarding", "Total Alighting"])
+            writer.writerow(["Timestamp", "Track ID", "Direction", "Total Right", "Total Left"])
             f.flush()
         
         while True:
@@ -46,12 +46,12 @@ def async_csv_writer():
 writer_thread = threading.Thread(target=async_csv_writer, daemon=True)
 writer_thread.start()
 
-def queue_event(track_id, direction, total_in, total_out):
+def queue_event(track_id, direction, total_right, total_left):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log_queue.put([timestamp, f"Person_{track_id}", direction, total_in, total_out])
+    log_queue.put([timestamp, f"Person_{track_id}", direction, total_right, total_left])
 
 # ==========================================
-# MAIN APC ENGINE (HEAD + SHOULDER DETECTION)
+# MAIN APC ENGINE
 # ==========================================
 model = YOLO(MODEL_PATH)
 
@@ -59,8 +59,8 @@ cap = cv2.VideoCapture(0)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 480)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 360)
 
-boarding_count = 0
-alighting_count = 0
+right_count = 0
+left_count = 0
 person_zone = {}
 
 frame_count = 0
@@ -100,13 +100,10 @@ try:
                     conf_tensor = keypoints_data.conf.cpu().numpy()
 
                     for kpts, confs, track_id in zip(kpts_tensor, conf_tensor, track_ids):
-                        # COCO Schema: 
-                        # 0: Nose, 1: L-Eye, 2: R-Eye, 3: L-Ear, 4: R-Ear (HEAD)
-                        # 5: L-Shoulder, 6: R-Shoulder (SHOULDERS)
+                        # Head & Shoulder keypoints (0 to 6)
                         head_shoulder_kpts = kpts[0:7]
                         head_shoulder_confs = confs[0:7] if confs is not None else [1.0] * 7
 
-                        # Filter valid keypoints using the lower 0.25 threshold
                         valid_kpts = []
                         has_head_pt = False
 
@@ -124,8 +121,6 @@ try:
                             hx2 = min(width, int(np.max(valid_kpts[:, 0]) * scale_x) + 15)
                             hy2 = min(height, int(np.max(valid_kpts[:, 1]) * scale_y) + 15)
 
-                            # Overhead Compensation: If only shoulders were seen (no facial keypoints),
-                            # expand the top boundary (hy1) upwards by 25 pixels to guarantee head inclusion.
                             if not has_head_pt:
                                 hy1 = max(0, hy1 - 25)
 
@@ -143,28 +138,25 @@ try:
             if track_id in person_zone:
                 previous_zone = person_zone[track_id]
 
-                # Right to Left -> BOARDING
+                # Moving from RIGHT to LEFT -> Count as LEFT
                 if previous_zone == "RIGHT" and current_zone == "LEFT":
-                    boarding_count += 1
-                    queue_event(track_id, "BOARDING", boarding_count, alighting_count)
+                    right_count += 1
+                    queue_event(track_id, "LEFT", right_count, left_count)
                     person_zone[track_id] = current_zone
 
-                # Left to Right -> ALIGHTING
+                # Moving from LEFT to RIGHT -> Count as RIGHT
                 elif previous_zone == "LEFT" and current_zone == "RIGHT":
-                    alighting_count += 1
-                    queue_event(track_id, "ALIGHTING", boarding_count, alighting_count)
+                    left_count += 1
+                    queue_event(track_id, "RIGHT", right_count, left_count)
                     person_zone[track_id] = current_zone
             else:
                 person_zone[track_id] = current_zone
 
             if SHOW_DISPLAY:
-                color = (0, 255, 0) if has_head_pt else (0, 255, 255) # Green if head seen, Yellow if shoulder estimated
+                color = (0, 255, 0) if has_head_pt else (0, 255, 255)
+                # Drawing bounding box & center point without any text labels
                 cv2.rectangle(frame, (hx1, hy1), (hx2, hy2), color, 2)
                 cv2.circle(frame, (hcx, (hy1 + hy2) // 2), 4, (0, 0, 255), -1)
-                
-                label = f"Head+Shoulder #{track_id}" if has_head_pt else f"Shoulder+Pad #{track_id}"
-                cv2.putText(frame, label, (hx1, max(hy1 - 5, 15)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
 
         # Clean stale IDs
         stale_ids = set(person_zone.keys()) - current_frame_ids
@@ -173,7 +165,7 @@ try:
 
         if SHOW_DISPLAY:
             cv2.line(frame, (gate_x, 0), (gate_x, height), (255, 255, 0), 2)
-            cv2.putText(frame, f"Boarding: {boarding_count} | Alighting: {alighting_count}", 
+            cv2.putText(frame, f"Right: {right_count} | Left: {left_count}", 
                         (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
             cv2.imshow("APC System (Head + Shoulder Tracking)", frame)
 
