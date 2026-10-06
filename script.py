@@ -13,7 +13,7 @@ from ultralytics import YOLO
 # CONFIGURATION
 # ==========================================
 MODEL_PATH = "yolov8n-pose.pt"
-CSV_FILE = "apc_passing_counts.csv"
+CSV_FILE = "passing_counts.csv"
 
 SHOW_DISPLAY = True          # Set False on headless bus deployment
 SKIP_FRAMES = 2              # Process AI every N frames
