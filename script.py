@@ -51,7 +51,7 @@ def queue_event(track_id, direction, total_right, total_left):
     log_queue.put([timestamp, f"Person_{track_id}", direction, total_right, total_left])
 
 # ==========================================
-# MAIN APC ENGINE
+# MAIN ENGINE
 # ==========================================
 model = YOLO(MODEL_PATH)
 
@@ -167,7 +167,7 @@ try:
             cv2.line(frame, (gate_x, 0), (gate_x, height), (255, 255, 0), 2)
             cv2.putText(frame, f"Right: {right_count} | Left: {left_count}", 
                         (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-            cv2.imshow("APC System (Head + Shoulder Tracking)", frame)
+            cv2.imshow("", frame)
 
             if cv2.waitKey(15) & 0xFF == ord('q'):
                 break
